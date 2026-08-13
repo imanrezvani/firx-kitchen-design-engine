@@ -1,0 +1,69 @@
+@import "tailwindcss";
+
+:root {
+  --background: #f6f5f1;
+  --foreground: #23262b;
+  --primary: #b8893c;
+  --primary-foreground: #ffffff;
+  --muted: #f1f0ec;
+  --muted-foreground: #6b7178;
+  --border: #e0ddd5;
+  --card: #ffffff;
+  --ring: #b8893c;
+  --danger: #d1453b;
+  --success: #2e9e5b;
+  --warning: #d98e2b;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-border: var(--border);
+  --color-card: var(--card);
+  --color-ring: var(--ring);
+  --color-danger: var(--danger);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --font-sans: var(--font-vazirmatn);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  direction: rtl;
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-vazirmatn), Tahoma, Arial, sans-serif;
+  line-height: 1.7;
+}
+
+/* Persian numerals helpers */
+.fa-num {
+  font-feature-settings: "ss01";
+}
+
+input,
+select,
+textarea,
+button {
+  font-family: inherit;
+}
+
+/* RTL scrollbar on tables etc. */
+::-webkit-scrollbar {
+  height: 8px;
+  width: 8px;
+}
+::-webkit-scrollbar-thumb {
+  background: #cfcac0;
+  border-radius: 4px;
+}
