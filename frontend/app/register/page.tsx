@@ -49,13 +49,13 @@ export default function RegisterPage() {
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-[#f6f5f1] p-4">
+    <div className="flex min-h-screen items-center justify-center bg-background p-4">
       <div className="w-full max-w-md">
         <div className="mb-8 text-center">
           <h1 className="text-2xl font-bold">ایجاد حساب سازمانی</h1>
           <p className="text-sm text-muted-foreground">شرکت و فضای کاری خود را بسازید</p>
         </div>
-        <div className="rounded-2xl border border-border bg-white p-8 shadow-sm">
+        <div className="rounded-2xl border border-border bg-card p-8 shadow-sm">
           <form onSubmit={submit} className="space-y-4">
             <Field label="نام شرکت">
               <Input value={form.company_name} onChange={set("company_name")} placeholder="شرکت دکوراسیون ..." required />

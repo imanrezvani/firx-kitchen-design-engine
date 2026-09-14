@@ -129,6 +129,29 @@ export function SpatialEditor({
     }
   }
 
+  function handleObjectDrag(i: number, o: ObjectPosition, e: any) {
+    // Use the dragged node's own position (Konva accumulates the drag delta),
+    // which is far more reliable than pointer coordinates for hit-testing.
+    const g = e.target;
+    const x = g.x();
+    const y = g.y();
+    let offsetMm: number;
+    if (o.wall) {
+      const horizontal = isHorizontal(o.wall);
+      const wallLenMm = horizontal ? width : length;
+      const maxOffset = wallLenMm - o.depth;
+      // objectRect places the offset origin at PAD for every wall, so the
+      // along-wall coordinate is (x-PAD) for north/south and (y-PAD) for west/east.
+      const along = horizontal ? x - PAD : y - PAD;
+      offsetMm = Math.max(0, Math.min(maxOffset, Math.round(along / SCALE)));
+    } else {
+      const maxX = width - o.width;
+      const offX = Math.round((x - PAD) / SCALE) - o.width / 2;
+      offsetMm = Math.max(0, Math.min(maxX, offX));
+    }
+    onChange(objects.map((obj, idx) => (idx === i ? { ...obj, offset: offsetMm } : obj)));
+  }
+
   return (
     <div className="space-y-3">
       {/* palette */}
@@ -149,9 +172,9 @@ export function SpatialEditor({
         ))}
       </div>
 
-      <div className="overflow-auto rounded-xl border border-border bg-[#fbfaf8]">
+      <div className="overflow-auto rounded-xl border border-border bg-muted/30">
         <Stage width={W + PAD * 2} height={L + PAD * 2}>
-          <Layer>
+          <Layer perfectDrawEnabled={false}>
             <Rect x={PAD} y={PAD} width={W} height={L} fill="#fdfcf9" stroke="#c9c2b6" strokeWidth={2} />
 
             {(["north", "south", "west", "east"] as WallSide[]).map((side) => {
@@ -190,7 +213,14 @@ export function SpatialEditor({
             {objects.map((o, i) => {
               const r = objectRect(o);
               return (
-                <Group key={i} x={r.x} y={r.y}>
+                <Group
+                  key={i}
+                  x={r.x}
+                  y={r.y}
+                  draggable
+                  perfectDrawEnabled={false}
+                  onDragEnd={(e) => handleObjectDrag(i, o, e)}
+                >
                   <Rect
                     width={r.w}
                     height={r.d}

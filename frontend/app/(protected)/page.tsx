@@ -14,7 +14,7 @@ interface Stats {
   customers: number;
   designs: number;
   recent_projects: { id: string; name: string; status: string; created_at: string }[];
-  recent_designs: { id: string; project_id: string; name: string; layout: string; updated_at: string }[];
+  recent_designs: { id: string; project_id: string; name: string; layout: string; updated_at: string; total_retail?: number }[];
 }
 
 export default function DashboardPage() {
@@ -105,6 +105,9 @@ export default function DashboardPage() {
                       <p className="text-sm font-medium">{d.name}</p>
                       <p className="text-xs text-muted-foreground">
                         چیدمان {LAYOUT_FA[d.layout] || d.layout} · {toJalali(d.updated_at)}
+                        {typeof d.total_retail === "number" && d.total_retail > 0 && (
+                          <> · قیمت تخمینی <b className="text-foreground">{faNumber(d.total_retail)}</b> تومان</>
+                        )}
                       </p>
                     </div>
                     <Link href={`/designer?design=${d.id}`}>

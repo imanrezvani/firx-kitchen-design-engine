@@ -1,7 +1,7 @@
 "use client";
 
-import { useState } from "react";
-import { apiGet, apiPost } from "@/lib/api";
+import { useEffect, useState } from "react";
+import { apiGet, apiPost, getToken } from "@/lib/api";
 import { faNumber } from "@/lib/format";
 import { Button } from "@/components/ui/button";
 import { Input, Select, Textarea } from "@/components/ui/input";
@@ -11,6 +11,7 @@ import { SpatialEditor } from "@/components/designer/spatial-editor";
 import { DesignCanvas } from "@/components/designer/design-canvas";
 import {
   DEFAULT_SPEC,
+  LAYOUT_ENGINE,
   LayoutKind,
   StyleKind,
   STYLE_FA,
@@ -123,6 +124,7 @@ export default function AiDesignerPage() {
   const [photos, setPhotos] = useState<PhotoUpload[]>([]);
   const [photoUrl, setPhotoUrl] = useState("");
   const [photoCaption, setPhotoCaption] = useState("");
+  const [photoUploading, setPhotoUploading] = useState(false);
   const [notes, setNotes] = useState("");
   const [preferences, setPreferences] = useState("");
   const [mustInclude, setMustInclude] = useState("");
@@ -151,6 +153,7 @@ export default function AiDesignerPage() {
   const [notice, setNotice] = useState("");
   const [result, setResult] = useState<PipelineResult | null>(null);
   const [provider, setProvider] = useState<"mock" | "gpt" | "gemini">("mock");
+  const [savedDesignId, setSavedDesignId] = useState<string | null>(null);
 
   async function loadProjects() {
     try {
@@ -159,6 +162,10 @@ export default function AiDesignerPage() {
       // non-fatal — user can proceed without a linked project
     }
   }
+
+  useEffect(() => {
+    loadProjects();
+  }, []);
 
   function patchRoom(key: "width" | "length" | "height", value: number) {
     setSpec((s) => syncWalls({ ...s, room: { ...s.room, [key]: value } }));
@@ -218,6 +225,40 @@ export default function AiDesignerPage() {
     setPhotoCaption("");
   }
 
+  async function uploadPhoto(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (!projectId) {
+      setError("برای بارگذاری عکس ابتدا یک پروژه انتخاب کنید.");
+      return;
+    }
+    setPhotoUploading(true);
+    setError("");
+    try {
+      const fd = new FormData();
+      fd.append("file", file);
+      const res = await fetch(`/api/v1/projects/${projectId}/files`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${getToken()}` },
+        body: fd,
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.detail || `خطای ${res.status}`);
+      }
+      const created = await res.json();
+      const contentUrl = `/api/v1/files/${created.id}/content`;
+      setPhotos((p) => [...p, { url: contentUrl, caption: photoCaption.trim() || file.name }]);
+      setPhotoCaption("");
+      setNotice("عکس بارگذاری شد.");
+    } catch (e: any) {
+      setError(e.message);
+    } finally {
+      setPhotoUploading(false);
+      e.target.value = "";
+    }
+  }
+
   function buildSpec(): KitchenSpecification {
     const req = {
       notes,
@@ -255,11 +296,12 @@ export default function AiDesignerPage() {
       return;
     }
     setLoading(true);
+    setSavedDesignId(null);
     try {
       const d = result.design;
       const created = await apiPost<any>(`/api/v1/projects/${projectId}/designs/generate`, {
         room_id: null,
-        layout: result.spec.layout.toLowerCase(),
+        layout: LAYOUT_ENGINE[result.spec.layout],
         countertop_material_id: null,
         cabinet_material_id: null,
         ai: {
@@ -269,8 +311,8 @@ export default function AiDesignerPage() {
           render_instructions: d.render_instructions,
         },
       });
+      setSavedDesignId(created?.id || null);
       setNotice(`طرح در پروژه ذخیره شد. (${faNumber(d.score)} امتیاز)`);
-      void created;
     } catch (e: any) {
       setError(e.message);
     } finally {
@@ -295,7 +337,7 @@ export default function AiDesignerPage() {
       {error && <p className="rounded-lg bg-danger/10 px-3 py-2 text-sm text-danger">{error}</p>}
       {notice && <p className="rounded-lg bg-success/10 px-3 py-2 text-sm text-success">{notice}</p>}
 
-      <div className="grid grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
         {/* Room */}
         <Card>
           <CardHeader>
@@ -344,9 +386,9 @@ export default function AiDesignerPage() {
                 value={spec.style}
                 onChange={(e) => setSpec((s) => ({ ...s, style: e.target.value as StyleKind }))}
               >
-                {(Object.keys(StyleKind) as StyleKind[]).map((k) => (
+                {(Object.values(StyleKind) as StyleKind[]).map((k) => (
                   <option key={k} value={k}>
-                    {STYLE_FA[k as StyleKind]}
+                    {STYLE_FA[k]}
                   </option>
                 ))}
               </Select>
@@ -452,7 +494,7 @@ export default function AiDesignerPage() {
               {spec.cabinets.length > 0 && (
                 <ul className="mt-2 space-y-1">
                   {spec.cabinets.map((c, i) => (
-                    <li key={i} className="flex items-center justify-between rounded-lg bg-white px-2 py-1 text-xs">
+                    <li key={i} className="flex items-center justify-between rounded-lg bg-card px-2 py-1 text-xs">
                       <span>
                         {CABINET_TYPES.find((x) => x.type === c.type)?.fa} · {faNumber(c.width)}×{faNumber(c.depth)} · ×{faNumber(c.count)}
                       </span>
@@ -495,7 +537,7 @@ export default function AiDesignerPage() {
               {spec.appliances.length > 0 && (
                 <ul className="mt-2 space-y-1">
                   {spec.appliances.map((a, i) => (
-                    <li key={i} className="flex items-center justify-between rounded-lg bg-white px-2 py-1 text-xs">
+                    <li key={i} className="flex items-center justify-between rounded-lg bg-card px-2 py-1 text-xs">
                       <span>{APPLIANCE_TYPES.find((x) => x.type === a.type)?.fa}</span>
                       <button className="text-danger" onClick={() => removeAppliance(i)}>×</button>
                     </li>
@@ -534,9 +576,16 @@ export default function AiDesignerPage() {
               <Input placeholder="توضیح" value={photoCaption} onChange={(e) => setPhotoCaption(e.target.value)} />
               <Button variant="outline" size="sm" onClick={addPhoto}>+</Button>
             </div>
+            <div className="flex items-center gap-2">
+              <label className="cursor-pointer rounded-lg border border-dashed border-border px-3 py-1.5 text-xs hover:border-primary/40">
+                {photoUploading ? "در حال بارگذاری..." : "بارگذاری عکس از دستگاه"}
+                <input type="file" accept="image/*" className="hidden" onChange={uploadPhoto} disabled={photoUploading} />
+              </label>
+              <span className="text-xs text-muted-foreground">برای بارگذاری ابتدا یک پروژه انتخاب کنید</span>
+            </div>
             {photos.map((p, i) => (
               <div key={i} className="flex items-center justify-between rounded-lg bg-muted/30 px-3 py-2 text-xs">
-                <span className="truncate">{p.url}</span>
+                <span className="truncate">{p.caption ? `${p.caption} — ` : ""}{p.url}</span>
                 <button className="text-danger" onClick={() => setPhotos(photos.filter((_, idx) => idx !== i))}>×</button>
               </div>
             ))}
@@ -573,6 +622,11 @@ export default function AiDesignerPage() {
           <Button variant="outline" onClick={saveDesign} disabled={loading || !projectId}>
             ذخیره در پروژه
           </Button>
+        )}
+        {savedDesignId && (
+          <a href={`/designer?design=${savedDesignId}`}>
+            <Button variant="outline">باز کردن طرح ذخیره‌شده</Button>
+          </a>
         )}
       </div>
 

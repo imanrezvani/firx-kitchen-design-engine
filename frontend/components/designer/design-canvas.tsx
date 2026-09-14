@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef } from "react";
+import { memo, useRef, useState } from "react";
 import { Stage, Layer, Rect, Text, Group } from "react-konva";
 import { faNumber } from "@/lib/format";
 
@@ -17,7 +17,6 @@ export interface CabinetLike {
   name?: string;
   material_name?: string;
 }
-
 export interface ApplianceLike {
   id?: string;
   appliance_type?: string;
@@ -70,7 +69,24 @@ function footprint(w: number, d: number, rot: number = 0) {
   return [w, d];
 }
 
-export function DesignCanvas({
+// Mirrors backend app/design/cabinet_types label_prefix per cabinet type.
+const LABEL_PREFIX: Record<string, string> = {
+  base: "B", corner: "B", drawer: "B", filler: "F", island: "I", microwave: "W",
+  oven: "T", sink: "B", tall: "T", vanity: "V", wall: "W", fridge: "T", hood: "W",
+};
+
+export function cabinetLabels(cabinets: CabinetLike[]): Record<string, string> {
+  const counters: Record<string, number> = {};
+  const out: Record<string, string> = {};
+  for (const c of cabinets) {
+    const prefix = LABEL_PREFIX[c.type || "base"] || "K";
+    counters[prefix] = (counters[prefix] || 0) + 1;
+    if (c.id) out[c.id] = `${prefix}${counters[prefix]}`;
+  }
+  return out;
+}
+
+function DesignCanvasInner({
   design,
   onEdit,
   selectedId,
@@ -82,22 +98,59 @@ export function DesignCanvas({
   onSelect?: (id: string) => void;
 }) {
   const stageRef = useRef<any>(null);
+  const [zoom, setZoom] = useState(1);
 
   const W = design.room.width_mm * SCALE;
   const L = design.room.length_mm * SCALE;
+  const labels = cabinetLabels(design.cabinets);
+
+  // Mouse-wheel zoom centered on the cursor (clamped 0.4x–3x).
+  function onWheel(e: any) {
+    e.evt.preventDefault();
+    const stage = stageRef.current;
+    if (!stage) return;
+    const oldScale = stage.scaleX();
+    const pointer = stage.getPointerPosition();
+    if (!pointer) return;
+    const direction = e.evt.deltaY > 0 ? -1 : 1;
+    const factor = 1.06;
+    const nextScale = Math.max(0.4, Math.min(3, oldScale * (direction > 0 ? factor : 1 / factor)));
+    const mousePointTo = {
+      x: (pointer.x - stage.x()) / oldScale,
+      y: (pointer.y - stage.y()) / oldScale,
+    };
+    stage.scale({ x: nextScale, y: nextScale });
+    stage.position({
+      x: pointer.x - mousePointTo.x * nextScale,
+      y: pointer.y - mousePointTo.y * nextScale,
+    });
+    setZoom(nextScale);
+  }
+
+  // Drag the room floor (empty area) to pan the stage.
+  function onFloorDragEnd(e: any) {
+    const stage = stageRef.current;
+    if (!stage) return;
+    stage.position({
+      x: stage.x() + e.target.x() - PAD,
+      y: stage.y() + e.target.y() - PAD,
+    });
+    e.target.position({ x: PAD, y: PAD });
+  }
 
   return (
-    <div className="overflow-auto rounded-xl border border-border bg-[#fbfaf8]">
+    <div className="overflow-auto rounded-xl border border-border bg-muted/30">
       <Stage
         ref={stageRef}
         width={W + PAD * 2}
         height={L + PAD * 2}
         scaleX={1}
         scaleY={1}
+        onWheel={onWheel}
         className="cursor-default"
       >
-        <Layer>
-          {/* room floor */}
+        <Layer perfectDrawEnabled={false}>
+          {/* room floor (draggable to pan) */}
           <Rect
             x={PAD}
             y={PAD}
@@ -106,6 +159,8 @@ export function DesignCanvas({
             fill="#fdfcf9"
             stroke="#c9c2b6"
             strokeWidth={2}
+            draggable
+            onDragEnd={onFloorDragEnd}
           />
           {/* wall labels */}
           <Text x={PAD + W / 2 - 12} y={PAD - 22} text="شمال" fontSize={12} fill="#888" />
@@ -138,6 +193,7 @@ export function DesignCanvas({
                 key={`cab-${i}`}
                 x={PAD + c.x * SCALE}
                 y={PAD + c.y * SCALE}
+                perfectDrawEnabled={false}
                 onClick={(e) => {
                   e.cancelBubble = true;
                   if (onSelect && c.id) onSelect(c.id);
@@ -168,7 +224,7 @@ export function DesignCanvas({
                   y={2}
                   width={fw * SCALE - 4}
                   height={fd * SCALE - 4}
-                  text={c.name || "کابینت"}
+                  text={`${c.id && labels[c.id] ? labels[c.id] + " · " : ""}${c.name || "کابینت"}`}
                   fontSize={fw > 120 ? 9 : 7}
                   fill="#3a332a"
                   align="center"
@@ -221,8 +277,13 @@ export function DesignCanvas({
         <span>
           ابعاد فضا: {faNumber(design.room.width_mm)}×{faNumber(design.room.length_mm)} میلی‌متر
         </span>
-        <span>برای جابجایی کابینت‌ها روی آن‌ها بکشید</span>
+        <span className="flex items-center gap-3">
+          <span>بزرگنمایی: {faNumber(Math.round(zoom * 100))}٪</span>
+          <span>برای جابجایی کابینت‌ها روی آن‌ها بکشید · چرخ ماوس برای زوم</span>
+        </span>
       </div>
     </div>
   );
 }
+
+export const DesignCanvas = memo(DesignCanvasInner);

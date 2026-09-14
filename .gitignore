@@ -174,3 +174,16 @@
 *.lz
 *.lzma
 *.iso
+
+backend/data/
+
+# Local databases and runtime data
+*.db
+*.sqlite
+*.sqlite3
+*.db-journal
+
+# Credentials / secrets
+credentials/
+secrets/
+*.secret

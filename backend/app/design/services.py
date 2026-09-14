@@ -10,6 +10,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.catalog.models import Appliance, CabinetItem, Material
+from app.design.derive import build_visual_prompt
 from app.design.engine import KitchenDesignEngine
 from app.design.parametric import RoomParam, DesignModel
 from app.rooms.models import Obstacle, Opening, Room, Wall
@@ -101,12 +102,17 @@ async def load_materials(session: AsyncSession) -> dict[str, Material]:
 async def generate_design(
     session: AsyncSession,
     project_id: uuid.UUID,
-    room_id: uuid.UUID,
-    layout: str,
+    room_id: uuid.UUID | None = None,
+    layout: str = "L",
     countertop_material_id: uuid.UUID | None = None,
     cabinet_material_id: uuid.UUID | None = None,
+    room_param: RoomParam | None = None,
 ) -> DesignModel:
-    room_param = await build_room_param(session, room_id)
+    if room_param is None:
+        if room_id is None:
+            room_param = RoomParam(width_mm=4200, length_mm=3600, height_mm=2700)
+        else:
+            room_param = await build_room_param(session, room_id)
     cabinet_rows, appliance_rows = await load_catalog(session)
 
     countertop_material = None
@@ -129,4 +135,7 @@ async def generate_design(
         cabinet_material=cabinet_material,
     )
     design = engine.generate()
+    # derive the AI-visualization prompt from the parametric model itself, so
+    # the image renderer is fed by the source of truth (see app/design/derive).
+    design.visual_prompt = build_visual_prompt(design)
     return design

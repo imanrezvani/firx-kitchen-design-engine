@@ -4,8 +4,11 @@ from fastapi import APIRouter, Depends
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.bom.costing import DEFAULT_CONFIG, derive_cost
+from app.catalog.models import Appliance, Material
 from app.core.deps import CurrentContext, get_tenant_db, resolve_context
 from app.design.models import Design
+from app.design.parametric import DesignModel
 from app.projects.models import Customer, Project
 
 router = APIRouter(prefix="/api/v1", tags=["dashboard"])
@@ -30,6 +33,39 @@ async def dashboard_stats(
     recent_designs = (
         (await db.execute(select(Design).order_by(Design.updated_at.desc()).limit(5))).scalars().all()
     )
+
+    # deterministic cost per recent design (model-derived; project override applied)
+    appliances = (await db.execute(select(Appliance))).scalars().all()
+    appliance_prices = {str(a.id): float(a.price) for a in appliances}
+    materials = (await db.execute(select(Material))).scalars().all()
+    material_prices: dict[str, float] = {}
+    for m in materials:
+        material_prices[m.name] = float(m.price_per_sqm)
+        material_prices[m.code] = float(m.price_per_sqm)
+    cfg = DEFAULT_CONFIG.model_copy(deep=True)
+    cfg = cfg.model_copy(update={"material_price_per_sqm": material_prices})
+
+    design_rows = []
+    for d in recent_designs:
+        try:
+            design = DesignModel.model_validate(d.snapshot)
+            project = await db.get(Project, d.project_id)
+            pc = cfg
+            if project and project.costing_config:
+                pc = cfg.model_copy(update=project.costing_config)
+            cost = derive_cost(design, pc, appliance_prices=appliance_prices)
+            retail = cost["summary"]["total_retail"]
+        except Exception:
+            retail = 0.0
+        design_rows.append({
+            "id": str(d.id),
+            "project_id": str(d.project_id),
+            "name": d.name,
+            "layout": d.layout,
+            "updated_at": d.updated_at.isoformat(),
+            "total_retail": round(retail, 2),
+        })
+
     return {
         "total_projects": project_count,
         "active_projects": active_projects,
@@ -44,14 +80,5 @@ async def dashboard_stats(
             }
             for p in recent_projects
         ],
-        "recent_designs": [
-            {
-                "id": str(d.id),
-                "project_id": str(d.project_id),
-                "name": d.name,
-                "layout": d.layout,
-                "updated_at": d.updated_at.isoformat(),
-            }
-            for d in recent_designs
-        ],
+        "recent_designs": design_rows,
     }

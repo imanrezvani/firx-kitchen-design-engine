@@ -56,8 +56,9 @@ class RoomParam(BaseModel):
 
 class Cabinet(BaseModel):
     id: str = ""
-    type: str  # base|wall|tall|corner|sink|drawer|oven|fridge
+    type: str  # base|wall|tall|corner|sink|drawer|oven|fridge|...
     catalog_item_id: str | None = None
+    # --- editable parameters (explicit, per task) ---
     width_mm: int
     height_mm: int
     depth_mm: int
@@ -68,7 +69,20 @@ class Cabinet(BaseModel):
     rotation: int = 0  # degrees, direction the front faces: 0=S, 90=W, 180=N, 270=E
     material_id: str | None = None
     material_name: str | None = None
+    box_thickness: int | None = None   # default 18 (¾″) via type spec
+    back_thickness: int | None = None  # default 16 (½″) via type spec
     name: str = "کابینت"
+    # --- interior configuration (editable; drives derived components) ---
+    # When None, the type registry supplies defaults / width heuristics.
+    door_config: str | None = None  # none|single|double|lift_up|split|drawers_top
+    drawer_count: int | None = None
+    shelf_count: int | None = None
+    toe_kick_height: int | None = None  # 0 disables; None => type default
+    end_panel_left: str | None = None  # not_exposed|standard|stained|furniture
+    end_panel_right: str | None = None
+    # appliance hook: embedded appliance this cabinet integrates (sink/oven/
+    # fridge/microwave/hood/...). Present only where the type allows it.
+    appliance_hook: str | None = None
 
 
 class AppliancePos(BaseModel):
@@ -114,6 +128,10 @@ class DesignModel(BaseModel):
     warnings: list[str] = Field(default_factory=list)
     score: int = 0
     generated_at: str = ""
+    # derived, model-fed AI visualization prompt (see app/design/derive.py).
+    # Set at generation/save time; the AI renderer consumes it as input and
+    # never becomes a source of truth.
+    visual_prompt: str = ""
 
 
 class DesignVersionOut(BaseModel):

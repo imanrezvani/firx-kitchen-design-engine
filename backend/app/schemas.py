@@ -80,6 +80,7 @@ class ProjectCreate(BaseModel):
     customer_id: UUID | None = None
     status: str = "draft"
     notes: str | None = None
+    costing_config: dict | None = None
 
 
 class ProjectUpdate(BaseModel):
@@ -87,12 +88,18 @@ class ProjectUpdate(BaseModel):
     customer_id: UUID | None = None
     status: str | None = None
     notes: str | None = None
+    costing_config: dict | None = None
 
 
 class ProjectOut(ProjectCreate):
     model_config = ConfigDict(from_attributes=True)
     id: UUID
     created_at: datetime
+
+
+class CostingConfigUpdate(BaseModel):
+    """Per-project override of the default PricingConfig (partial allowed)."""
+    costing_config: dict | None = None
 
 
 # ---------------------------------------------------------------------------

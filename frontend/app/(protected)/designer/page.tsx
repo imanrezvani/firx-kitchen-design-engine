@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
-import { apiGet, apiPost, apiPut } from "@/lib/api";
+import { apiGet, apiPost, apiPut, getToken } from "@/lib/api";
 import { faNumber, LAYOUT_FA } from "@/lib/format";
 import { Button } from "@/components/ui/button";
 import { Input, Select } from "@/components/ui/input";
@@ -69,7 +69,12 @@ export default function DesignerPage() {
   const [notice, setNotice] = useState("");
   const [step, setStep] = useState(1);
   const [validation, setValidation] = useState<null | { score: number; results: { level: string; message: string }[] }>(null);
-  const [bom, setBom] = useState<null | { rows: any[]; totals: any; sheets: any }>(null);
+  const [bom, setBom] = useState<null | { rows: any[]; totals: any; sheets: any; parts?: any[] }>(null);
+  const [drawings, setDrawings] = useState<null | { plan: any; elevations: any[] }>(null);
+  const [cost, setCost] = useState<null | { summary: any; subtotals: any; items: any; markup: any }>(null);
+  const [cutList, setCutList] = useState<null | { parts: any[]; part_count: number; total_qty: number; sheets: any }>(null);
+  const [viz, setViz] = useState<null | { prompt: string; cabinets: any[]; appliances: any[]; layout: string; note: string }>(null);
+  const [priceCfg, setPriceCfg] = useState<null | Record<string, number>>(null);
   const [versions, setVersions] = useState<any[]>([]);
   const [verDesc, setVerDesc] = useState("");
 
@@ -84,6 +89,7 @@ export default function DesignerPage() {
   const preDesign = searchParams.get("design");
   const preProject = searchParams.get("project");
   const handledRef = useRef<{ design?: boolean; project?: boolean }>({});
+  const editTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   async function load() {
     try {
@@ -220,18 +226,50 @@ export default function DesignerPage() {
     }
   }
 
+  const designRef = useRef<any>(null);
+  designRef.current = design;
+
   async function editCabinets(cabs: any[]) {
-    if (!design) return;
-    const next = { ...design, cabinets: cabs };
+    if (!designRef.current) return;
+    const next = { ...designRef.current, cabinets: cabs };
     setDesign(next);
     setValidation(null);
-    try {
-      const saved = await apiPut<DesignModel>(`/api/v1/designs/${design.id}`, { cabinets: cabs, appliances: design.appliances });
-      setDesign(saved);
-    } catch (e: any) {
-      setError(e.message);
-    }
+    // optimistic local update now; persist debounced so rapid drags batch
+    if (editTimerRef.current) clearTimeout(editTimerRef.current);
+    const designId = designRef.current.id;
+    const appliances = designRef.current.appliances;
+    editTimerRef.current = setTimeout(async () => {
+      try {
+        const saved = await apiPut<DesignModel>(`/api/v1/designs/${designId}`, { cabinets: cabs, appliances });
+        setDesign(saved);
+      } catch (e: any) {
+        setError(e.message);
+      }
+    }, 400);
   }
+
+  const handleCanvasSelect = useCallback((id: string) => {
+    setSelectedCabId(id);
+  }, []);
+
+  const handleCanvasEdit = useCallback((cab: any) => {
+    const d = designRef.current;
+    if (!d) return;
+    const next = { ...d, cabinets: d.cabinets.map((c: any) => (c.id === cab.id ? cab : c)) };
+    setDesign(next);
+    setValidation(null);
+    if (editTimerRef.current) clearTimeout(editTimerRef.current);
+    const designId = d.id;
+    const appliances = d.appliances;
+    editTimerRef.current = setTimeout(async () => {
+      try {
+        const saved = await apiPut<DesignModel>(`/api/v1/designs/${designId}`, { cabinets: next.cabinets, appliances });
+        setDesign(saved);
+      } catch (e: any) {
+        setError(e.message);
+      }
+    }, 400);
+  }, []);
 
   async function validate() {
     if (!design) return;
@@ -248,6 +286,72 @@ export default function DesignerPage() {
     setError("");
     try {
       setBom(await apiGet(`/api/v1/designs/${design.id}/bom`));
+    } catch (e: any) {
+      setError(e.message);
+    }
+  }
+
+  async function loadDrawings() {
+    if (!design) return;
+    setError("");
+    try {
+      setDrawings(await apiGet(`/api/v1/designs/${design.id}/drawings`));
+    } catch (e: any) {
+      setError(e.message);
+    }
+  }
+
+  async function loadCost() {
+    if (!design) return;
+    setError("");
+    try {
+      setCost(await apiGet(`/api/v1/designs/${design.id}/cost`));
+    } catch (e: any) {
+      setError(e.message);
+    }
+  }
+
+  async function loadCutList() {
+    if (!design) return;
+    setError("");
+    try {
+      setCutList(await apiGet(`/api/v1/designs/${design.id}/cut-list`));
+    } catch (e: any) {
+      setError(e.message);
+    }
+  }
+
+  async function loadVisualization() {
+    if (!design) return;
+    setError("");
+    try {
+      setViz(await apiGet(`/api/v1/designs/${design.id}/visualization`));
+    } catch (e: any) {
+      setError(e.message);
+    }
+  }
+
+  async function loadPriceCfg() {
+    if (!projectId) return;
+    setError("");
+    try {
+      const r = await apiGet<{ costing_config: Record<string, number> }>(`/api/v1/projects/${projectId}/costing`);
+      setPriceCfg(r.costing_config);
+    } catch (e: any) {
+      setError(e.message);
+    }
+  }
+
+  async function savePriceCfg() {
+    if (!projectId || !priceCfg) return;
+    setError("");
+    try {
+      const { margin_pct, overhead_pct, contingency_pct, material_tax_pct, delivery_fee } = priceCfg;
+      await apiPut(`/api/v1/projects/${projectId}/costing`, {
+        costing_config: { margin_pct, overhead_pct, contingency_pct, material_tax_pct, delivery_fee },
+      });
+      setNotice("تنظیمات قیمت‌گذاری ذخیره شد.");
+      loadCost();
     } catch (e: any) {
       setError(e.message);
     }
@@ -308,12 +412,12 @@ export default function DesignerPage() {
       </div>
 
       {/* Stepper */}
-      <ol className="flex items-center gap-2 text-sm">
+      <ol className="flex items-center gap-2 overflow-x-auto text-sm sm:gap-3">
         {STEP_LABELS.map((label, i) => {
           const n = i + 1;
           const done = step > n;
           return (
-            <li key={label} className="flex items-center gap-2">
+            <li key={label} className="flex shrink-0 items-center gap-2">
               <span
                 className={`flex h-7 w-7 items-center justify-center rounded-full text-xs font-bold ${
                   done ? "bg-success text-white" : step === n ? "bg-primary text-white" : "bg-muted/60 text-muted-foreground"
@@ -321,8 +425,8 @@ export default function DesignerPage() {
               >
                 {done ? "✓" : faNumber(n)}
               </span>
-              <span className={step === n ? "font-bold" : "text-muted-foreground"}>{label}</span>
-              {n < STEP_LABELS.length && <span className="mx-1 text-muted-foreground">—</span>}
+              <span className={`whitespace-nowrap max-sm:hidden ${step === n ? "font-bold" : "text-muted-foreground"}`}>{label}</span>
+              {n < STEP_LABELS.length && <span className="mx-1 text-muted-foreground max-sm:hidden">—</span>}
             </li>
           );
         })}
@@ -353,13 +457,13 @@ export default function DesignerPage() {
       )}
 
       {step === 2 && (
-        <div className="grid grid-cols-3 gap-4">
-          <Card className="col-span-2">
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+          <Card className="md:col-span-2">
             <CardHeader>
               <CardTitle>ابعاد فضا</CardTitle>
             </CardHeader>
             <CardBody>
-              <div className="grid grid-cols-4 gap-3">
+              <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
                 <Field label="عرض (mm)">
                   <Input type="number" value={rf.width_mm} onChange={(e) => setRf({ ...rf, width_mm: +e.target.value })} />
                 </Field>
@@ -388,7 +492,7 @@ export default function DesignerPage() {
               {openForm && (
                 <div className="mt-4 rounded-xl border border-border bg-muted/20 p-4">
                   <p className="mb-3 text-sm font-bold">{openForm === "window" ? "افزودن پنجره" : "افزودن درب"}</p>
-                  <div className="grid grid-cols-4 gap-3">
+                  <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
                     <Field label="دیوار">
                       <Select value={oForm.wall} onChange={(e) => setOForm({ ...oForm, wall: e.target.value })}>
                         <option value="north">شمال</option>
@@ -466,8 +570,8 @@ export default function DesignerPage() {
       )}
 
       {step === 3 && (
-        <div className="grid grid-cols-3 gap-4">
-          <Card className="col-span-2">
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+          <Card className="md:col-span-2">
             <CardHeader>
               <CardTitle>انتخاب چیدمان</CardTitle>
             </CardHeader>
@@ -528,6 +632,25 @@ export default function DesignerPage() {
           <div className="flex flex-wrap gap-2">
             <Button variant="outline" size="sm" onClick={validate}>اعتبارسنجی</Button>
             <Button variant="outline" size="sm" onClick={loadBom}>لیست متریال (BOM)</Button>
+            <Button variant="outline" size="sm" onClick={loadCutList}>لیست برش</Button>
+            <Button variant="outline" size="sm" onClick={loadCost}>قیمت‌گذاری</Button>
+            <Button variant="outline" size="sm" onClick={async () => {
+              if (!design) return;
+              try {
+                const res = await fetch(`/api/v1/designs/${design.id}/quote.html`, {
+                  headers: { Authorization: `Bearer ${getToken()}` },
+                });
+                if (!res.ok) throw new Error("خطا در دریافت پیش‌فاکتور");
+                const blob = await res.blob();
+                const url = URL.createObjectURL(blob);
+                window.open(url, "_blank");
+                setTimeout(() => URL.revokeObjectURL(url), 60000);
+              } catch (e: any) {
+                setError(e.message);
+              }
+            }}>پیش‌فاکتور (PDF/چاپ)</Button>
+            <Button variant="outline" size="sm" onClick={loadVisualization}>پرامپت رندر AI</Button>
+            <Button variant="outline" size="sm" onClick={loadDrawings}>نقشه‌های فنی</Button>
             <Button variant="outline" size="sm" onClick={loadVersions}>نسخه‌ها</Button>
             <Button variant="outline" size="sm" onClick={() => { setStep(3); }}>تولید مجدد</Button>
           </div>
@@ -535,15 +658,26 @@ export default function DesignerPage() {
           <DesignCanvas
             design={design}
             selectedId={selectedCabId}
-            onSelect={setSelectedCabId}
-            onEdit={(cab) => {
-              const next = design.cabinets.map((c) => (c.id === cab.id ? cab : c));
-              editCabinets(next);
-            }}
+            onSelect={handleCanvasSelect}
+            onEdit={handleCanvasEdit}
           />
 
-          <div className="grid grid-cols-3 gap-4">
-            <Card>
+          {selectedCabId && (
+            <CabinetProperties
+              cabinet={design.cabinets.find((c: any) => c.id === selectedCabId) as any}
+              materials={materials}
+              onSave={(patch) => {
+                const next = design.cabinets.map((c: any) =>
+                  c.id === selectedCabId ? { ...c, ...patch } : c
+                );
+                editCabinets(next);
+              }}
+              onClose={() => setSelectedCabId(null)}
+            />
+          )}
+
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+            <Card className="md:col-span-1">
               <CardHeader>
                 <CardTitle>مشخصات طرح</CardTitle>
               </CardHeader>
@@ -557,7 +691,7 @@ export default function DesignerPage() {
             </Card>
 
             {validation && (
-              <Card className="col-span-2">
+              <Card className="md:col-span-2">
                 <CardHeader>
                   <CardTitle>نتایج اعتبارسنجی — امتیاز {faNumber(validation.score)}</CardTitle>
                 </CardHeader>
@@ -576,7 +710,7 @@ export default function DesignerPage() {
             )}
 
             {bom && (
-              <Card className="col-span-3">
+              <Card className="md:col-span-3">
                 <CardHeader>
                   <CardTitle>لیست متریال (BOM)</CardTitle>
                 </CardHeader>
@@ -596,7 +730,7 @@ export default function DesignerPage() {
                         <tr key={i} className="border-b border-border/40 last:border-0">
                           <td className="px-5 py-2">{r.name}</td>
                           <td className="px-5 py-2 text-muted-foreground">
-                            {r.category === "cabinet" ? "کابینت" : r.category === "appliance" ? "لوازم" : "صفحه"}
+                            {r.category === "cabinet" ? "کابینت" : r.category === "appliance" ? "لوازم" : r.category === "hardware" ? "یراقآلات" : "صفحه"}
                           </td>
                           <td className="px-5 py-2 text-muted-foreground">{faNumber(r.width_mm)}×{faNumber(r.height_mm)}×{faNumber(r.depth_mm)}</td>
                           <td className="px-5 py-2">{faNumber(r.unit_price)} تومان</td>
@@ -608,15 +742,207 @@ export default function DesignerPage() {
                   <div className="flex flex-wrap justify-end gap-6 border-t border-border bg-muted/20 px-5 py-4 text-sm">
                     <span>کابینت: <b>{faNumber(bom.totals.cabinets)}</b></span>
                     <span>لوازم: <b>{faNumber(bom.totals.appliances)}</b></span>
+                    <span>یراقآلات: <b>{faNumber(bom.totals.hardware)}</b></span>
                     <span>جمع کل: <b>{faNumber(bom.totals.grand_total)} تومان</b> ({bom.totals.accuracy})</span>
-                    <span>ورق ۱۸ میلی‌متر: <b>{faNumber(bom.sheets.sheets_18mm)}</b></span>
+                    <span>ورق ۱۸ میلی‌متر: <b>{faNumber(bom.sheets.sheets_by_thickness?.[18] ?? 0)}</b></span>
+                    <span>ورق ۱۶ میلی‌متر: <b>{faNumber(bom.sheets.sheets_by_thickness?.[16] ?? 0)}</b></span>
+                    <span>متریال: <b>{faNumber(bom.sheets.total_m2)}</b> m²</span>
+                  </div>
+                  {bom.parts && bom.parts.length > 0 && (
+                    <div className="max-h-64 overflow-auto border-t border-border">
+                      <table className="w-full text-sm">
+                        <thead className="sticky top-0 bg-muted/20">
+                          <tr className="border-b border-border text-right text-xs text-muted-foreground">
+                            <th className="px-5 py-2">کابینت</th>
+                            <th className="px-5 py-2">قطعه</th>
+                            <th className="px-5 py-2">ابعاد</th>
+                            <th className="px-5 py-2">ضخامت</th>
+                            <th className="px-5 py-2">تعداد</th>
+                            <th className="px-5 py-2">لب‌چسب</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {bom.parts.map((p, i) => (
+                            <tr key={i} className="border-b border-border/40 last:border-0">
+                              <td className="px-5 py-1">{p.cabinet}</td>
+                              <td className="px-5 py-1">{p.part}</td>
+                              <td className="px-5 py-1 text-muted-foreground">
+                                {faNumber(p.width_mm)}×{faNumber(p.length_mm)}
+                              </td>
+                              <td className="px-5 py-1">{faNumber(p.thickness_mm)}</td>
+                              <td className="px-5 py-1">{faNumber(p.qty)}</td>
+                              <td className="px-5 py-1 text-muted-foreground">
+                                {p.edge_banding?.join(" + ") || "—"}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </CardBody>
+              </Card>
+            )}
+
+            {cost && (
+              <Card className="md:col-span-3">
+                <CardHeader>
+                  <CardTitle>قیمت‌گذاری پروژه (مشتق از مدل)</CardTitle>
+                </CardHeader>
+                <CardBody className="space-y-3 text-sm">
+                  <div className="flex flex-wrap items-center justify-between rounded-lg bg-muted/20 p-4">
+                    <div>
+                      <div className="text-xs text-muted-foreground">قیمت نهایی مصرف‌کننده</div>
+                      <div className="text-2xl font-bold text-success">{faNumber(cost.summary.total_retail)} تومان</div>
+                    </div>
+                    <div className="text-left">
+                      <div className="text-xs text-muted-foreground">قیمت به‌ازای هر متر خطی</div>
+                      <div className="font-bold">{faNumber(cost.summary.price_per_linear_m)} تومان</div>
+                    </div>
+                  </div>
+                  <table className="w-full text-sm">
+                    <tbody>
+                      <tr className="border-b border-border/40"><td className="py-1.5">متریال</td><td className="text-left">{faNumber(cost.subtotals.materials)}</td></tr>
+                      <tr className="border-b border-border/40"><td className="py-1.5">یراق‌آلات</td><td className="text-left">{faNumber(cost.subtotals.hardware)}</td></tr>
+                      <tr className="border-b border-border/40"><td className="py-1.5">لب‌چسب</td><td className="text-left">{faNumber(cost.subtotals.edge_banding)}</td></tr>
+                      <tr className="border-b border-border/40"><td className="py-1.5">اکسسوری</td><td className="text-left">{faNumber(cost.subtotals.accessories)}</td></tr>
+                      <tr className="border-b border-border/40"><td className="py-1.5">نیروی کار</td><td className="text-left">{faNumber(cost.subtotals.labor)}</td></tr>
+                      <tr className="border-b border-border/40"><td className="py-1.5">لوازم</td><td className="text-left">{faNumber(cost.subtotals.appliances)}</td></tr>
+                      <tr className="border-b border-border/40"><td className="py-1.5">صفحه کابینت</td><td className="text-left">{faNumber(cost.subtotals.countertops)}</td></tr>
+                      <tr className="border-b border-border/40"><td className="py-1.5">هزینه‌های سربار</td><td className="text-left">{faNumber(cost.markup.overhead)}</td></tr>
+                      <tr className="border-b border-border/40"><td className="py-1.5">سود</td><td className="text-left">{faNumber(cost.markup.margin_amount)}</td></tr>
+                      <tr className="border-b border-border/40"><td className="py-1.5">مالیات</td><td className="text-left">{faNumber(cost.markup.tax)}</td></tr>
+                      <tr><td className="py-1.5">هزینه ارسال</td><td className="text-left">{faNumber(cost.markup.delivery_fee)}</td></tr>
+                    </tbody>
+                  </table>
+                  <div className="flex items-center justify-between border-t border-border pt-3">
+                    <div className="flex items-center gap-2">
+                      <Button variant="outline" size="sm" onClick={loadPriceCfg}>تنظیمات قیمت</Button>
+                      {priceCfg && (
+                        <>
+                          <div className="flex items-center gap-1 text-xs">
+                            <span className="text-muted-foreground">سود %</span>
+                            <input type="number" className="w-14 rounded border border-border bg-background px-1 py-0.5 text-left"
+                              value={priceCfg.margin_pct ?? 0}
+                              onChange={(e) => setPriceCfg({ ...priceCfg, margin_pct: Number(e.target.value) })} />
+                          </div>
+                          <div className="flex items-center gap-1 text-xs">
+                            <span className="text-muted-foreground">سربار %</span>
+                            <input type="number" className="w-14 rounded border border-border bg-background px-1 py-0.5 text-left"
+                              value={priceCfg.overhead_pct ?? 0}
+                              onChange={(e) => setPriceCfg({ ...priceCfg, overhead_pct: Number(e.target.value) })} />
+                          </div>
+                          <div className="flex items-center gap-1 text-xs">
+                            <span className="text-muted-foreground">مالیات %</span>
+                            <input type="number" className="w-14 rounded border border-border bg-background px-1 py-0.5 text-left"
+                              value={priceCfg.material_tax_pct ?? 0}
+                              onChange={(e) => setPriceCfg({ ...priceCfg, material_tax_pct: Number(e.target.value) })} />
+                          </div>
+                          <Button variant="outline" size="sm" onClick={savePriceCfg}>ذخیره</Button>
+                        </>
+                      )}
+                    </div>
                   </div>
                 </CardBody>
               </Card>
             )}
 
+            {viz && (
+              <Card className="md:col-span-3">
+                <CardHeader>
+                  <CardTitle>پرامپت رندر هوش مصنوعی (مشتق از مدل)</CardTitle>
+                </CardHeader>
+                <CardBody className="space-y-3">
+                  <p className="rounded-lg bg-muted/20 p-3 text-sm leading-6 whitespace-pre-line" dir="rtl">{viz.prompt}</p>
+                  <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
+                    <span>کابینت: <b>{faNumber(viz.cabinets.length)}</b></span>
+                    <span>لوازم: <b>{faNumber(viz.appliances.length)}</b></span>
+                    <span>چیدمان: <b>{LAYOUT_FA[viz.layout] || viz.layout}</b></span>
+                  </div>
+                  <p className="text-xs text-muted-foreground">{viz.note}</p>
+                </CardBody>
+              </Card>
+            )}
+
+            {cutList && (
+              <Card className="md:col-span-3">
+                <CardHeader>
+                  <CardTitle>لیست برش (مشتق از مدل)</CardTitle>
+                </CardHeader>
+                <CardBody className="p-0">
+                  <div className="flex flex-wrap gap-4 px-5 py-3 text-sm">
+                    <span>قطعات: <b>{faNumber(cutList.part_count)}</b></span>
+                    <span>جمع تعداد: <b>{faNumber(cutList.total_qty)}</b></span>
+                    <span>ورق‌ها: <b>{faNumber(cutList.sheets.total_sheets)}</b> (۱۸mm: {faNumber(cutList.sheets.sheets_by_thickness?.[18] ?? 0)} · ۱۶mm: {faNumber(cutList.sheets.sheets_by_thickness?.[16] ?? 0)})</span>
+                  </div>
+                  <div className="max-h-72 overflow-auto">
+                    <table className="w-full text-sm">
+                      <thead className="sticky top-0 bg-muted/20">
+                        <tr className="border-b border-border text-right text-xs text-muted-foreground">
+                          <th className="px-5 py-2">شناسه</th>
+                          <th className="px-5 py-2">کابینت</th>
+                          <th className="px-5 py-2">قطعه</th>
+                          <th className="px-5 py-2">ابعاد</th>
+                          <th className="px-5 py-2">ضخامت</th>
+                          <th className="px-5 py-2">تعداد</th>
+                          <th className="px-5 py-2">جهت دانه</th>
+                          <th className="px-5 py-2">لب‌چسب</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {cutList.parts.map((p, i) => (
+                          <tr key={i} className="border-b border-border/40 last:border-0">
+                            <td className="px-5 py-1 font-medium" dir="ltr">{p.id}</td>
+                            <td className="px-5 py-1">{p.cabinet}</td>
+                            <td className="px-5 py-1">{p.part}</td>
+                            <td className="px-5 py-1 text-muted-foreground">{faNumber(p.width_mm)}×{faNumber(p.length_mm)}</td>
+                            <td className="px-5 py-1">{faNumber(p.thickness_mm)}</td>
+                            <td className="px-5 py-1">{faNumber(p.qty)}</td>
+                            <td className="px-5 py-1 text-muted-foreground">{({ vertical: "عمودی", horizontal: "افقی", any: "هر جهت" } as Record<string, string>)[p.grain] || p.grain}</td>
+                            <td className="px-5 py-1 text-muted-foreground">{p.edge_banding?.join(" + ") || "—"}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </CardBody>
+              </Card>
+            )}
+
+            {drawings && (
+              <Card className="md:col-span-3">
+                <CardHeader>
+                  <CardTitle>نقشه‌های فنی (مشتق از مدل)</CardTitle>
+                </CardHeader>
+                <CardBody className="space-y-4">
+                  <div className="text-xs text-muted-foreground">
+                    نقشه پلان: {faNumber(drawings.plan.cabinets.length)} کابینت ·
+                    اتاق {faNumber(drawings.plan.room.width_mm)}×{faNumber(drawings.plan.room.length_mm)}
+                  </div>
+                  {drawings.elevations.map((s, i) => (
+                    <div key={i}>
+                      <div className="mb-1 text-sm font-medium">نما خط {s.wall}</div>
+                      <div className="flex h-24 items-end gap-px overflow-x-auto rounded border border-border bg-muted/20 p-2">
+                        {s.cabinets.map((c: any, j: number) => (
+                          <div
+                            key={j}
+                            title={`${c.label} ${c.type} ${c.width_mm}×${c.height_mm} z=${c.z_mm}`}
+                            className="flex shrink-0 flex-col items-center justify-end border border-border bg-background text-[9px] leading-tight"
+                            style={{ width: Math.max(24, c.width_mm / 18), height: `${Math.max(18, Math.min(88, c.height_mm / 22))}%` }}
+                          >
+                            <span>{c.label}</span>
+                            <span className="text-muted-foreground">{faNumber(c.width_mm)}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </CardBody>
+              </Card>
+            )}
+
             {versions.length > 0 && (
-              <Card className="col-span-3">
+              <Card className="md:col-span-3">
                 <CardHeader>
                   <CardTitle>نسخه‌های طرح</CardTitle>
                 </CardHeader>
@@ -643,6 +969,98 @@ export default function DesignerPage() {
         </div>
       )}
     </div>
+  );
+}
+
+function CabinetProperties({
+  cabinet,
+  materials,
+  onSave,
+  onClose,
+}: {
+  cabinet: any;
+  materials: any[];
+  onSave: (patch: Record<string, any>) => void;
+  onClose: () => void;
+}) {
+  const [form, setForm] = useState<Record<string, any>>({
+    name: cabinet.name ?? "",
+    width_mm: cabinet.width_mm,
+    height_mm: cabinet.height_mm,
+    depth_mm: cabinet.depth_mm,
+    door_config: cabinet.door_config ?? "",
+    drawer_count: cabinet.drawer_count ?? "",
+    shelf_count: cabinet.shelf_count ?? "",
+    material_id: cabinet.material_id ?? "",
+  });
+  if (!cabinet) return null;
+
+  const doorOptions = [
+    ["", "پیش‌فرض (خودکار)"],
+    ["none", "بدون درب"],
+    ["single", "تک‌در"],
+    ["double", "دودر"],
+    ["lift_up", "درب بالارو"],
+    ["split", "درب دولایه"],
+    ["drawers_top", "کشو بالا + درب"],
+  ];
+
+  return (
+    <Card>
+      <CardHeader className="flex flex-row items-center justify-between">
+        <CardTitle>مشخصات کابینت {cabinet.name || ""}</CardTitle>
+        <Button variant="ghost" size="sm" onClick={onClose}>بستن</Button>
+      </CardHeader>
+      <CardBody className="space-y-3">
+        <div className="grid grid-cols-3 gap-3">
+          <Field label="عرض (میلی‌متر)">
+            <Input type="number" value={form.width_mm} onChange={(e) => setForm({ ...form, width_mm: Number(e.target.value) })} />
+          </Field>
+          <Field label="ارتفاع (میلی‌متر)">
+            <Input type="number" value={form.height_mm} onChange={(e) => setForm({ ...form, height_mm: Number(e.target.value) })} />
+          </Field>
+          <Field label="عمق (میلی‌متر)">
+            <Input type="number" value={form.depth_mm} onChange={(e) => setForm({ ...form, depth_mm: Number(e.target.value) })} />
+          </Field>
+        </div>
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="تنظیم درب">
+            <Select value={form.door_config} onChange={(e) => setForm({ ...form, door_config: e.target.value })}>
+              {doorOptions.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+            </Select>
+          </Field>
+          <Field label="تعداد کشو">
+            <Input type="number" value={form.drawer_count} onChange={(e) => setForm({ ...form, drawer_count: e.target.value === "" ? null : Number(e.target.value) })} />
+          </Field>
+          <Field label="تعداد طبقه">
+            <Input type="number" value={form.shelf_count} onChange={(e) => setForm({ ...form, shelf_count: e.target.value === "" ? null : Number(e.target.value) })} />
+          </Field>
+          <Field label="متریال بدنه">
+            <Select value={form.material_id} onChange={(e) => setForm({ ...form, material_id: e.target.value })}>
+              <option value="">پیش‌فرض</option>
+              {materials.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
+            </Select>
+          </Field>
+        </div>
+        <Button className="w-full" onClick={() => {
+          onSave({
+            name: form.name,
+            width_mm: form.width_mm,
+            height_mm: form.height_mm,
+            depth_mm: form.depth_mm,
+            door_config: form.door_config || null,
+            drawer_count: form.drawer_count,
+            shelf_count: form.shelf_count,
+            material_id: form.material_id || null,
+          });
+        }}>
+          اعمال تغییرات
+        </Button>
+        <p className="text-xs text-muted-foreground">
+          تغییر پارامترها، اجزای مشتق‌شده، سخت‌افزار، متریال، هزینه و نقشه‌ها را به‌صورت خودکار به‌روزرسانی می‌کند.
+        </p>
+      </CardBody>
+    </Card>
   );
 }
 

@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from app.bom.components import aggregate_parts, sheet_count
+from app.bom.hardware import derive_hardware_breakdown
+from app.design.derive import material_estimate, number_cabinets
 from app.design.parametric import DesignModel
 from app.design import rules as R
 
@@ -67,13 +70,34 @@ def generate_bom(design: DesignModel, catalog_by_id: dict[str, dict]) -> dict:
             }
         )
 
-    # materials consumption (sheet estimate, +/-10%)
-    sheets = _sheet_estimate(design)
+    # materials consumption (component-derived sheet counts)
+    sheets = sheet_count(design.cabinets)
+
+    # cabinet numbering for the cut list (stable labels B1/W1/T1…)
+    labels = number_cabinets(design)
+
+    # hardware breakdown (derived: hinges/slides/pins/pulls per cabinet)
+    hardware = derive_hardware_breakdown(design)
+    for h in hardware["items"]:
+        rows.append(
+            {
+                "category": "hardware",
+                "code": h["code"],
+                "name": h["name"],
+                "qty": h["qty"],
+                "width_mm": 0,
+                "height_mm": 0,
+                "depth_mm": 0,
+                "unit_price": h["unit_price"],
+                "total_price": h["total_price"],
+            }
+        )
 
     cabinet_total = sum(r["total_price"] for r in rows if r["category"] == "cabinet")
     appliance_total = sum(r["total_price"] for r in rows if r["category"] == "appliance")
     counter_total = sum(r["total_price"] for r in rows if r["category"] == "countertop")
-    total = cabinet_total + appliance_total + counter_total
+    hardware_total = sum(r["total_price"] for r in rows if r["category"] == "hardware")
+    total = cabinet_total + appliance_total + counter_total + hardware_total
 
     return {
         "rows": rows,
@@ -81,23 +105,13 @@ def generate_bom(design: DesignModel, catalog_by_id: dict[str, dict]) -> dict:
             "cabinets": round(cabinet_total, 2),
             "appliances": round(appliance_total, 2),
             "countertops": round(counter_total, 2),
+            "hardware": round(hardware_total, 2),
             "grand_total": round(total, 2),
             "accuracy": "±۱۰٪",
         },
         "sheets": sheets,
+        "hardware": hardware,
+        "parts": aggregate_parts(design.cabinets, labels),
+        "material_estimate": material_estimate(design),
         "note": "این BOM برآورد تخمینی متریال و قیمت است؛ برای تولید نهایی به تأیید مهندسی نیاز دارد.",
     }
-
-
-def _sheet_estimate(design: DesignModel) -> dict:
-    """Rough 18mm sheet count from visible cabinet faces (front + side tops)."""
-    sheet_area = 1.22 * 2.44  # m^2
-    total_area = 0.0
-    for c in design.cabinets:
-        if c.type == "wall":
-            area = (c.width_mm / 1000) * (c.height_mm / 1000)
-        else:
-            area = (c.width_mm / 1000) * (c.height_mm / 1000)
-        total_area += area
-    sheets = int(total_area / sheet_area) + 2
-    return {"m2": round(total_area, 2), "sheets_18mm": sheets}

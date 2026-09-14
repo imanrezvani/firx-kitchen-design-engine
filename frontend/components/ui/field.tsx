@@ -60,7 +60,7 @@ export function Modal({
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
       <div
-        className={cn("flex max-h-[90vh] w-full flex-col overflow-hidden rounded-2xl bg-white shadow-2xl", wide ? "max-w-4xl" : "max-w-lg")}
+        className={cn("flex max-h-[90vh] w-full flex-col overflow-hidden rounded-2xl bg-card shadow-2xl", wide ? "max-w-4xl" : "max-w-lg")}
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between border-b border-border px-5 py-4">

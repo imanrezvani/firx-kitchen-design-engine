@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, String, Text, func
+from sqlalchemy import JSON, DateTime, ForeignKey, String, Text, func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -30,6 +30,8 @@ class Project(TenantBase, PKMixin, TimestampMixin):
         String(30), default="draft", nullable=False
     )  # draft|designing|needs_review|approved|completed
     notes: Mapped[str | None] = mapped_column(Text)
+    # per-project costing overrides (PricingConfig JSON); None => shop defaults
+    costing_config: Mapped[dict | None] = mapped_column(JSON)
     created_date: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

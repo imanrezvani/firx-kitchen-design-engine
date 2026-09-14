@@ -115,6 +115,7 @@ export default function ProjectsPage() {
       ) : (
         <Card>
           <CardBody className="p-0">
+            <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-border text-right text-xs text-muted-foreground">
@@ -157,6 +158,7 @@ export default function ProjectsPage() {
                 })}
               </tbody>
             </table>
+            </div>
           </CardBody>
         </Card>
       )}

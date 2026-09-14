@@ -86,7 +86,7 @@ class ApplianceOut(ApplianceCreate):
 
 # Design generation input
 class DesignGenerateRequest(BaseModel):
-    room_id: UUID
+    room_id: UUID | None = None
     layout: str = Field(..., description="linear|L|U|galley|island|peninsula")
     countertop_material_id: UUID | None = None
     cabinet_material_id: UUID | None = None

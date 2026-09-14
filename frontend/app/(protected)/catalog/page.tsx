@@ -204,6 +204,7 @@ export default function CatalogPage() {
       ) : (
         <Card>
           <CardBody className="p-0">
+            <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-border text-right text-xs text-muted-foreground">
@@ -239,6 +240,7 @@ export default function CatalogPage() {
                 {tab === "appliances" && !appliances.length && <tr><td colSpan={5}><EmptyState title="لوازمی ثبت نشده" /></td></tr>}
               </tbody>
             </table>
+            </div>
           </CardBody>
         </Card>
       )}

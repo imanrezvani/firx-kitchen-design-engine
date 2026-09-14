@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { apiGet } from "@/lib/api";
-import { toJalali, LAYOUT_FA } from "@/lib/format";
+import { toJalali, LAYOUT_FA, faNumber } from "@/lib/format";
 import { Card, CardBody, CardHeader, CardTitle, Badge } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/field";
 
@@ -13,6 +13,7 @@ interface DesignRow {
   name: string;
   layout: string;
   updated_at: string;
+  total_retail?: number;
 }
 
 export default function ReportsPage() {
@@ -54,12 +55,14 @@ export default function ReportsPage() {
           ) : !designs.length ? (
             <EmptyState title="گزارشی برای نمایش نیست" description="پس از تولید اولین طرح، گزارش آن در اینجا دیده می‌شود" />
           ) : (
+            <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-border text-right text-xs text-muted-foreground">
                   <th className="px-5 py-3">طرح</th>
                   <th className="px-5 py-3">پروژه</th>
                   <th className="px-5 py-3">چیدمان</th>
+                  <th className="px-5 py-3">قیمت تخمینی</th>
                   <th className="px-5 py-3">آخرین به‌روزرسانی</th>
                   <th className="px-5 py-3 text-left">باز کردن</th>
                 </tr>
@@ -72,6 +75,9 @@ export default function ReportsPage() {
                     <td className="px-5 py-3">
                       <Badge>{LAYOUT_FA[d.layout] || d.layout}</Badge>
                     </td>
+                    <td className="px-5 py-3 font-medium">
+                      {d.total_retail ? `${faNumber(d.total_retail)} تومان` : "—"}
+                    </td>
                     <td className="px-5 py-3 text-muted-foreground">{toJalali(d.updated_at)}</td>
                     <td className="px-5 py-3 text-left">
                       <Link href={`/designer?design=${d.id}`}>
@@ -82,6 +88,7 @@ export default function ReportsPage() {
                 ))}
               </tbody>
             </table>
+            </div>
           )}
         </CardBody>
       </Card>
